@@ -84,7 +84,8 @@ class AzureIntrospector(VersionIntrospector):
                 )
             )
 
-        # Fetch first result set using Azure's DMV
+        # Fetch result sets using Azure's DMV (first result set only)
+        result_sets: list[list[ColumnInfo]] = []
         try:
             cursor.execute(
                 """
@@ -107,12 +108,15 @@ class AzureIntrospector(VersionIntrospector):
                 for row in cursor.fetchall()
                 if row[0] is not None
             ]
+            if columns:
+                result_sets.append(columns)
         except Exception:
-            columns = []
+            pass
 
         # Enrich with column descriptions from extended properties
-        descriptions = self._fetch_column_descriptions(sp_name, cursor, columns)
-        for col in columns:
-            col.description = descriptions.get(col.name)
+        for rs in result_sets:
+            descriptions = self._fetch_column_descriptions(sp_name, cursor, rs)
+            for col in rs:
+                col.description = descriptions.get(col.name)
 
-        return SPMetadata(name=sp_name, parameters=parameters, columns=columns)
+        return SPMetadata(name=sp_name, parameters=parameters, result_sets=result_sets)

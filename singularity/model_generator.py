@@ -174,6 +174,7 @@ def generate_model(
     meta: SPMetadata,
     mode: Literal["dynamic", "source"] = "source",
     naming_convention: Literal["snake_case", "camelCase", "PascalCase"] = "snake_case",
+    result_set_index: int = 0,
 ) -> type[BaseModel] | str:
     """Generate a Pydantic v2 model from stored procedure metadata.
 
@@ -191,15 +192,18 @@ def generate_model(
             - "snake_case" (default): order_id, customer_name
             - "camelCase": orderId, customerName
             - "PascalCase": OrderId, CustomerName
+        result_set_index: Which result set to generate a model for
+            (0 = first). Ignored when ``mode="source"`` with multiple
+            result sets — use ``generate_all_models()`` instead.
 
     Returns:
         A BaseModel subclass (dynamic mode) or a Python source string (source mode).
 
     Example:
-        >>> meta = SPMetadata(name="usp_GetOrders", columns=[
+        >>> meta = SPMetadata(name="usp_GetOrders", result_sets=[[
         ...     ColumnInfo(name="OrderId", sql_type="INT", nullable=False),
         ...     ColumnInfo(name="Total", sql_type="DECIMAL", nullable=True),
-        ... ])
+        ... ]])
         >>> model = generate_model(meta, mode="dynamic")
         >>> isinstance(model, type) and issubclass(model, BaseModel)
         True
@@ -207,6 +211,57 @@ def generate_model(
     if mode == "dynamic":
         return _generate_dynamic(meta, naming_convention)
     return _generate_source(meta, naming_convention)
+
+
+def generate_all_models(
+    meta: SPMetadata,
+    mode: Literal["dynamic", "source"] = "source",
+    naming_convention: Literal["snake_case", "camelCase", "PascalCase"] = "snake_case",
+) -> type[BaseModel] | tuple[type[BaseModel], ...] | str | list[str]:
+    """Generate models for ALL result sets of a stored procedure.
+
+    For multi-result-set SPs, generates one model class per result set.
+    For source mode, returns a list of source strings (one per class).
+    For dynamic mode, returns a tuple of model classes.
+
+    The last result set model includes ``from_db()`` which handles
+    multiple result sets at execution time.
+    """
+    num_rs = len(meta.result_sets)
+
+    if num_rs <= 1:
+        # Single result set — delegate to generate_model
+        result = generate_model(meta, mode=mode, naming_convention=naming_convention)
+        if mode == "dynamic":
+            return (result,)  # type: ignore[return-value]
+        return [result]  # type: ignore[return-value]
+
+    if mode == "dynamic":
+        models: list[type[BaseModel]] = []
+        for i, rs in enumerate(meta.result_sets):
+            # Create a temporary meta with just this result set
+            from singularity.types import ColumnInfo  # noqa: PLC0415 — local import for cycle safety
+
+            temp_meta = meta.model_copy(update={"result_sets": [rs]})
+            m = _generate_dynamic_single_rs(temp_meta, f"{meta.name}_Result{i + 1}", naming_convention)
+            models.append(m)
+
+        # Patch from_db on the LAST model to handle all RS
+        _patch_from_db_multi(models, meta)
+
+        return tuple(models)
+
+    # Source mode — generate one class per result set
+    sources: list[str] = []
+    for i, rs in enumerate(meta.result_sets):
+        from singularity.types import ColumnInfo  # noqa: PLC0415
+
+        temp_meta = meta.model_copy(update={"result_sets": [rs]})
+        suffix = f"Result{i + 1}" if i > 0 else ""
+        src = _generate_source(temp_meta, naming_convention, class_suffix=suffix)
+        sources.append(src)
+
+    return sources
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +290,16 @@ def _generate_dynamic(
     meta: SPMetadata,
     naming_convention: str = "snake_case",
 ) -> type[BaseModel]:
-    """Generate a runtime BaseModel subclass via create_model()."""
+    """Generate a runtime BaseModel subclass via create_model() for the first RS."""
+    return _generate_dynamic_single_rs(meta, meta.name, naming_convention)
+
+
+def _generate_dynamic_single_rs(
+    meta: SPMetadata,
+    class_name: str,
+    naming_convention: str,
+) -> type[BaseModel]:
+    """Generate a dynamic model for a single result set."""
     fields: dict[str, Any] = {}
 
     for col in meta.columns:
@@ -257,7 +321,7 @@ def _generate_dynamic(
             else:
                 fields[field_name] = (py_type, ...)
 
-    # Add OUTPUT param fields to the model (as Optional[T] = None)
+    # Add OUTPUT param fields (as Optional[T] = None)
     output_param_names: list[str] = []
     for p in meta.parameters:
         if p.direction in ("OUT", "INOUT"):
@@ -266,7 +330,7 @@ def _generate_dynamic(
             output_param_names.append(p.name)
             fields[field_name] = (type(None) | py_type, None)
 
-    model = create_model(meta.name, **fields)
+    model = create_model(class_name, **fields)
     model._output_param_names = output_param_names  # type: ignore[attr-defined]
 
     # Build param_order for executor
@@ -309,6 +373,35 @@ def _patch_from_db(
     model.from_db = from_db  # type: ignore[attr-defined]
 
 
+def _patch_from_db_multi(
+    models: list[type[BaseModel]],
+    meta: SPMetadata,
+) -> None:
+    """Monkey-patch a ``from_db()`` onto the last model for multi-RS SPs.
+
+    The patched method returns ``list[tuple[Model1, Model2, ...]]``.
+    """
+    from singularity.executor import execute_sp_multi
+
+    output_param_names = [p.name for p in meta.parameters if p.direction in ("OUT", "INOUT")]
+    all_param_names = [p.name for p in meta.parameters]
+
+    last_model = models[-1]
+
+    @classmethod  # type: ignore[misc]
+    def from_db(cls: type[BaseModel], conn_str: str, **params: Any) -> list[Any]:  # type: ignore[no-redef]
+        return execute_sp_multi(
+            conn_str,
+            meta.name,
+            models,
+            input_params=params,
+            output_param_names=output_param_names,
+            param_order=all_param_names,
+        )
+
+    last_model.from_db = from_db  # type: ignore[attr-defined]
+
+
 # ---------------------------------------------------------------------------
 # Source mode
 # ---------------------------------------------------------------------------
@@ -317,11 +410,15 @@ def _patch_from_db(
 def _generate_source(
     meta: SPMetadata,
     naming_convention: str = "snake_case",
+    class_suffix: str = "",
 ) -> str:
     """Generate a Python source code string for a Pydantic model."""
-    class_name = sanitize_field_name(meta.name, "PascalCase")
+    class_name = sanitize_field_name(meta.name, "PascalCase") + class_suffix
+    rs = meta.columns  # first result set via backward-compat property
 
-    has_descriptions = any(col.description for col in meta.columns)
+    has_descriptions = any(col.description for col in rs)
+    num_rs = len(meta.result_sets)
+    is_single_rs = num_rs <= 1
 
     lines: list[str] = []
     lines.append("from __future__ import annotations")
@@ -331,15 +428,18 @@ def _generate_source(
     lines.append("from pydantic import BaseModel")
     if has_descriptions:
         lines.append("from pydantic import Field")
-    lines.append("from singularity.executor import execute_sp")
+    if is_single_rs:
+        lines.append("from singularity.executor import execute_sp")
+    else:
+        lines.append("from singularity.executor import execute_sp_multi")
     lines.append("")
 
-    # Identify OUTPUT params (used for no-columns case too)
+    # Identify OUTPUT params
     output_params = [p for p in meta.parameters if p.direction in ("OUT", "INOUT")]
     output_param_names = [p.name for p in output_params]
     all_param_names = [p.name for p in meta.parameters]
 
-    if not meta.columns:
+    if not rs:
         lines.append(f"class {class_name}(BaseModel):")
         lines.append(f"    _sp_name = {repr(meta.name)}")
         lines.append(f"    _output_param_names = {repr(output_param_names)}")
@@ -349,12 +449,25 @@ def _generate_source(
             lines.append(f"    {field_name}: Optional[Any] = None")
         if output_params:
             lines.append("")
-        lines.append("    @classmethod")
-        lines.append("    def from_db(cls, conn_str: str, **params: Any) -> list[BaseModel]:")
+        if is_single_rs:
+            lines.append("    @classmethod")
+            lines.append("    def from_db(cls, conn_str: str, **params: Any) -> list[BaseModel]:")
+        else:
+            lines.append("    @classmethod")
+            lines.append(
+                "    def from_db("
+                "cls, conn_str: str, **params: Any"
+                ") -> list[Any]:"
+            )
         lines.append('        """Execute the stored procedure and return typed instances."""')
-        lines.append("        return execute_sp(")
+        if is_single_rs:
+            lines.append("        return execute_sp(")
+        else:
+            lines.append("        return execute_sp_multi(")
         lines.append("            conn_str,")
         lines.append("            cls._sp_name,")
+        if not is_single_rs:
+            lines.append("            _MODELS,")
         lines.append("            cls,")
         lines.append("            input_params=params,")
         lines.append(f"            output_param_names={repr(output_param_names)},")
@@ -365,11 +478,6 @@ def _generate_source(
         lines.append("")
         return "\n".join(lines) + "\n"
 
-    # Identify OUTPUT params
-    output_params = [p for p in meta.parameters if p.direction in ("OUT", "INOUT")]
-    output_param_names = [p.name for p in output_params]
-    all_param_names = [p.name for p in meta.parameters]
-
     lines.append(f"class {class_name}(BaseModel):")
     lines.append(f'    """Model generated from stored procedure: {meta.name}.')
     lines.append("")
@@ -379,7 +487,7 @@ def _generate_source(
     lines.append(f"    _sp_name = {repr(meta.name)}")
     lines.append("")
 
-    for col in meta.columns:
+    for col in rs:
         py_type = _resolve_py_type(col.sql_type)
         field_name = sanitize_field_name(col.name, naming_convention)  # type: ignore[arg-type]
         type_name = _py_type_name(py_type)
@@ -415,12 +523,25 @@ def _generate_source(
         lines.append("    _output_param_names: list[str] = []")
 
     lines.append("")
-    lines.append("    @classmethod")
-    lines.append("    def from_db(cls, conn_str: str, **params: Any) -> list[BaseModel]:")
+    if is_single_rs:
+        lines.append("    @classmethod")
+        lines.append("    def from_db(cls, conn_str: str, **params: Any) -> list[BaseModel]:")
+    else:
+        lines.append("    @classmethod")
+        lines.append(
+            "    def from_db("
+            "cls, conn_str: str, **params: Any"
+            ") -> list[Any]:"
+        )
     lines.append('        """Execute the stored procedure and return typed instances."""')
-    lines.append("        return execute_sp(")
+    if is_single_rs:
+        lines.append("        return execute_sp(")
+    else:
+        lines.append("        return execute_sp_multi(")
     lines.append("            conn_str,")
     lines.append("            cls._sp_name,")
+    if not is_single_rs:
+        lines.append("            _MODELS,")
     lines.append("            cls,")
     lines.append("            input_params=params,")
     lines.append(f"            output_param_names={repr(output_param_names)},")

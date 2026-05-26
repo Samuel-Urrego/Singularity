@@ -74,12 +74,12 @@ def sample_sp_metadata() -> SPMetadata:
                 nullable=True,
             ),
         ],
-        columns=[
+        result_sets=[[
             ColumnInfo(name="OrderId", sql_type="INT", nullable=False),
             ColumnInfo(name="CustomerName", sql_type="NVARCHAR(100)", nullable=True),
             ColumnInfo(name="OrderDate", sql_type="DATETIME", nullable=False),
             ColumnInfo(name="Total", sql_type="DECIMAL(18,2)", nullable=True),
-        ],
+        ]],
     )
 
 
@@ -89,7 +89,7 @@ def no_column_metadata() -> SPMetadata:
     return SPMetadata(
         name="usp_ExecuteOnly",
         parameters=[],
-        columns=[],
+        result_sets=[],
     )
 
 
@@ -99,7 +99,7 @@ def all_types_metadata() -> SPMetadata:
     return SPMetadata(
         name="usp_AllTypes",
         parameters=[],
-        columns=[
+        result_sets=[[
             ColumnInfo(name="IntCol", sql_type="INT", nullable=True),
             ColumnInfo(name="BigIntCol", sql_type="BIGINT", nullable=True),
             ColumnInfo(name="SmallIntCol", sql_type="SMALLINT", nullable=True),
@@ -116,7 +116,7 @@ def all_types_metadata() -> SPMetadata:
             ColumnInfo(name="MoneyCol", sql_type="MONEY", nullable=True),
             ColumnInfo(name="GuidCol", sql_type="UNIQUEIDENTIFIER", nullable=True),
             ColumnInfo(name="UnknownCol", sql_type="HIERARCHYID", nullable=True),
-        ],
+        ]],
     )
 
 

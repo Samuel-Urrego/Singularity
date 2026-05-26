@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class Parameter(BaseModel):
     """Metadata for a single stored procedure parameter."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     """Parameter name (e.g. '@OrderId')."""
@@ -32,6 +34,8 @@ class Parameter(BaseModel):
 class ColumnInfo(BaseModel):
     """Metadata for a single result set column."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     """Column name as returned by SQL Server."""
 
@@ -46,7 +50,9 @@ class ColumnInfo(BaseModel):
 
 
 class SPMetadata(BaseModel):
-    """Complete metadata for a stored procedure's parameters and result set."""
+    """Complete metadata for a stored procedure's parameters and result sets."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     """Stored procedure name (schema-qualified where available)."""
@@ -54,5 +60,14 @@ class SPMetadata(BaseModel):
     parameters: list[Parameter] = []
     """List of parameter metadata objects."""
 
-    columns: list[ColumnInfo] = []
-    """List of result set column metadata objects."""
+    result_sets: list[list[ColumnInfo]] = []
+    """List of result sets, each being a list of ColumnInfo objects."""
+
+    @property
+    def columns(self) -> list[ColumnInfo]:
+        """First result set columns (backward compatibility).
+
+        Returns the column metadata for the first result set,
+        or an empty list if there are no result sets.
+        """
+        return self.result_sets[0] if self.result_sets else []

@@ -105,7 +105,7 @@ class TestIntrospect:
 
         # Mock strategy to return expected metadata
         mock_strategy = MagicMock()
-        expected_meta = SPMetadata(name="usp_Test", parameters=[], columns=[])
+        expected_meta = SPMetadata(name="usp_Test", parameters=[], result_sets=[])
         mock_strategy.introspect.return_value = expected_meta
 
         with (

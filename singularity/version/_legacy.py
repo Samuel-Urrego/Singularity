@@ -87,26 +87,30 @@ class LegacyIntrospector(VersionIntrospector):
 
         # First result set: try sp_describe_first_result_set;
         # fall back to sys.columns + sys.objects join.
-        columns: list[ColumnInfo] = []
+        result_sets: list[list[ColumnInfo]] = []
+
         try:
             tsql = f"EXEC {sp_name}"
-            cursor.execute(
-                "{CALL sp_describe_first_result_set(?, NULL, 0)}",
-                (tsql,),
-            )
-            columns = [
-                ColumnInfo(
-                    name=row[2],  # name (index 2)
-                    sql_type=(row[5] or "UNKNOWN").upper(),  # system_type_name (index 5)
-                    nullable=bool(row[3]),  # is_nullable (index 3)
+            for idx in range(10):
+                cursor.execute(
+                    "{CALL sp_describe_first_result_set(?, NULL, ?)}",
+                    (tsql, idx),
                 )
-                for row in cursor.fetchall()
-                if row[2] is not None
-            ]
+                rows = cursor.fetchall()
+                columns = [
+                    ColumnInfo(
+                        name=row[2],  # name (index 2)
+                        sql_type=(row[5] or "UNKNOWN").upper(),  # system_type_name (index 5)
+                        nullable=bool(row[3]),  # is_nullable (index 3)
+                    )
+                    for row in rows
+                    if row[2] is not None
+                ]
+                if not columns:
+                    break
+                result_sets.append(columns)
         except Exception:
             # Fallback: query sys.columns through sys.objects for the SP
-            # This gives us the last SELECT's column metadata when
-            # sp_describe_first_result_set is unavailable.
             try:
                 cursor.execute(
                     """
@@ -131,13 +135,16 @@ class LegacyIntrospector(VersionIntrospector):
                     )
                     for row in cursor.fetchall()
                 ]
+                if columns:
+                    result_sets.append(columns)
             except Exception:
-                # If everything fails, return empty columns gracefully
+                # If everything fails, return empty result sets gracefully
                 pass
 
         # Enrich with column descriptions from extended properties
-        descriptions = self._fetch_column_descriptions(sp_name, cursor, columns)
-        for col in columns:
-            col.description = descriptions.get(col.name)
+        for rs in result_sets:
+            descriptions = self._fetch_column_descriptions(sp_name, cursor, rs)
+            for col in rs:
+                col.description = descriptions.get(col.name)
 
-        return SPMetadata(name=sp_name, parameters=parameters, columns=columns)
+        return SPMetadata(name=sp_name, parameters=parameters, result_sets=result_sets)

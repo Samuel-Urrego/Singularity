@@ -86,30 +86,37 @@ class ModernIntrospector(VersionIntrospector):
                 )
             )
 
-        # Fetch first result set metadata via sp_describe_first_result_set
+        # Fetch all result sets via sp_describe_first_result_set
+        result_sets: list[list[ColumnInfo]] = []
         try:
             tsql = f"EXEC {sp_name}"
-            cursor.execute(
-                "{CALL sp_describe_first_result_set(?, NULL, 0)}",
-                (tsql,),
-            )
-            columns = [
-                ColumnInfo(
-                    name=row[2],  # name (index 2)
-                    sql_type=(row[5] or "UNKNOWN").upper(),  # system_type_name (index 5)
-                    nullable=bool(row[3]),  # is_nullable (index 3)
+            for idx in range(10):
+                cursor.execute(
+                    "{CALL sp_describe_first_result_set(?, NULL, ?)}",
+                    (tsql, idx),
                 )
-                for row in cursor.fetchall()
-                if row[2] is not None  # skip unnamed columns
-            ]
+                rows = cursor.fetchall()
+                columns = [
+                    ColumnInfo(
+                        name=row[2],  # name (index 2)
+                        sql_type=(row[5] or "UNKNOWN").upper(),  # system_type_name (index 5)
+                        nullable=bool(row[3]),  # is_nullable (index 3)
+                    )
+                    for row in rows
+                    if row[2] is not None  # skip unnamed columns
+                ]
+                if not columns:
+                    break
+                result_sets.append(columns)
         except Exception:
             # If sp_describe_first_result_set fails (e.g. dynamic SQL),
-            # return empty columns rather than crashing.
-            columns = []
+            # return empty result sets rather than crashing.
+            pass
 
         # Enrich with column descriptions from extended properties
-        descriptions = self._fetch_column_descriptions(sp_name, cursor, columns)
-        for col in columns:
-            col.description = descriptions.get(col.name)
+        for rs in result_sets:
+            descriptions = self._fetch_column_descriptions(sp_name, cursor, rs)
+            for col in rs:
+                col.description = descriptions.get(col.name)
 
-        return SPMetadata(name=sp_name, parameters=parameters, columns=columns)
+        return SPMetadata(name=sp_name, parameters=parameters, result_sets=result_sets)
