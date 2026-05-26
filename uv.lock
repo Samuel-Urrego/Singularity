@@ -725,6 +725,7 @@ source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
     { name = "pyodbc" },
+    { name = "rich" },
     { name = "tomli" },
     { name = "typer" },
 ]
@@ -746,6 +747,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14" },
+    { name = "rich", specifier = ">=15.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "tomli", specifier = ">=2.0" },
     { name = "typer", specifier = ">=0.9" },
