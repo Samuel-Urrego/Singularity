@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "SQL Server stored procedure introspection and Pydantic model generator"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
     { name = "Samuel Urrego" },
 ]
@@ -51,3 +51,6 @@ ignore_missing_imports = true
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = ["assets", "assets.*", "tests", "tests.*", "generated_models", "docs"]
