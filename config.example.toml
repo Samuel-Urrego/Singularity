@@ -1,0 +1,76 @@
+# Singularity Configuration Example
+# ==================================
+# This file documents all available configuration options.
+# Copy this file, customise it, and run:
+#   singularity generate --config my-config.toml
+
+[connection]
+# SQL Server connection settings
+# ==============================
+
+# Server hostname or IP address (REQUIRED)
+server = "localhost"
+
+# Database name (REQUIRED)
+database = "AdventureWorks"
+
+# ODBC driver name (default: "ODBC Driver 18 for SQL Server")
+# Supported values: "ODBC Driver 17 for SQL Server", "ODBC Driver 18 for SQL Server",
+#                   "SQL Server" (legacy), "SQL Server Native Client 11.0"
+driver = "ODBC Driver 18 for SQL Server"
+
+# Use Windows Authentication (default: true)
+# When true, username/password are ignored
+trusted_connection = true
+
+# SQL Server Authentication credentials
+# Only used when trusted_connection = false
+# username = "sa"
+# password = "your_password_here"
+
+
+[sp_selection]
+# Stored procedure selection criteria
+# ===================================
+# Provide an explicit list and/or a wildcard pattern.
+# At least one must be specified.
+
+# Explicit list of stored procedures to introspect
+procedures = [
+    "usp_GetOrders",
+    "usp_GetCustomers",
+    "usp_GetProducts",
+]
+
+# Wildcard pattern to resolve against INFORMATION_SCHEMA.ROUTINES
+# pattern = "usp_Report%"
+
+
+[output]
+# Output preferences for generated models
+# ========================================
+
+# Output directory (default: "." — current directory)
+directory = "generated_models"
+
+# Generation mode: "source" (default) or "dynamic"
+# - "source": writes .py files to the output directory
+# - "dynamic": prints class information to the console
+mode = "source"
+
+# File naming template (default: "{sp_name}.py")
+# Available variables: {sp_name}, {schema}, {database}
+# Examples:
+#   "{sp_name}.py"          → "usp_GetOrders.py"
+#   "{schema}_{sp_name}.py" → "dbo_usp_GetOrders.py"
+#   "{database}_{sp_name}"  → "AdventureWorks_usp_GetOrders.py"
+file_naming = "{schema}_{sp_name}.py"
+
+# Field naming convention: "snake_case" (default), "camelCase", or "PascalCase"
+# Controls how SQL column names are converted to Python field names.
+# Examples:
+#   SQL column: "Customer Name"
+#   snake_case: "customer_name"
+#   camelCase:  "customerName"
+#   PascalCase: "CustomerName"
+naming_convention = "snake_case"
