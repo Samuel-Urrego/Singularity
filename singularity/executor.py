@@ -59,7 +59,7 @@ def execute_sp(
 
         # Build EXEC with named parameters
         named_parts: list[str] = []
-        for i, name in enumerate(param_order):
+        for name in param_order:
             if name in output_param_names:
                 named_parts.append(f"{name}=? OUTPUT")
             else:
@@ -69,13 +69,13 @@ def execute_sp(
         cursor.execute(tsql, call_params)
 
         # Read result rows
-        columns = [col[0] for col in cursor.description] if cursor.description else []
+        db_columns = [col[0] for col in cursor.description] if cursor.description else []
 
         result: list[BaseModel] = []
         for row in cursor.fetchall():
             row_data: dict[str, Any] = {}
-            for i, col_name in enumerate(columns):
-                row_data[col_name] = row[i]  # None stays None
+            for idx, col_name in enumerate(db_columns):
+                row_data[col_name] = row[idx]  # None stays None
             result.append(model(**row_data))
 
         # If no result rows but there are output params, create a single instance
@@ -178,7 +178,7 @@ def execute_sp_multi(
                 instances: list[BaseModel] = []
                 for rs_idx, rs_rows in enumerate(all_rs_rows):
                     model_cls = models[rs_idx] if rs_idx < len(models) else models[-1]
-                    row_data = dict(zip(all_rs_columns[rs_idx], rs_rows[row_idx]))
+                    row_data = dict(zip(all_rs_columns[rs_idx], rs_rows[row_idx], strict=True))
                     instances.append(model_cls(**row_data))
                 result.append(tuple(instances))
 

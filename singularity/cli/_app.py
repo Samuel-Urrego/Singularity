@@ -21,5 +21,5 @@ app = typer.Typer(
 )
 
 # Register commands — import triggers @app.command() decorators
-import singularity.cli.generate  # noqa: E402, F401 — registers generate command
 import singularity.cli.docs_generate  # noqa: E402, F401 — registers docs command
+import singularity.cli.generate  # noqa: E402, F401 — registers generate command

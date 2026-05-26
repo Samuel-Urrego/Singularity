@@ -217,7 +217,7 @@ def generate_all_models(
     meta: SPMetadata,
     mode: Literal["dynamic", "source"] = "source",
     naming_convention: Literal["snake_case", "camelCase", "PascalCase"] = "snake_case",
-) -> type[BaseModel] | tuple[type[BaseModel], ...] | str | list[str]:
+) -> Any:
     """Generate models for ALL result sets of a stored procedure.
 
     For multi-result-set SPs, generates one model class per result set.
@@ -226,6 +226,10 @@ def generate_all_models(
 
     The last result set model includes ``from_db()`` which handles
     multiple result sets at execution time.
+
+    Returns:
+        In dynamic mode: a single model or tuple of models.
+        In source mode: a single source string or list of source strings.
     """
     num_rs = len(meta.result_sets)
 
@@ -233,17 +237,15 @@ def generate_all_models(
         # Single result set — delegate to generate_model
         result = generate_model(meta, mode=mode, naming_convention=naming_convention)
         if mode == "dynamic":
-            return (result,)  # type: ignore[return-value]
-        return [result]  # type: ignore[return-value]
+            return (result,)
+        return [result]
 
     if mode == "dynamic":
         models: list[type[BaseModel]] = []
         for i, rs in enumerate(meta.result_sets):
-            # Create a temporary meta with just this result set
-            from singularity.types import ColumnInfo  # noqa: PLC0415 — local import for cycle safety
-
             temp_meta = meta.model_copy(update={"result_sets": [rs]})
-            m = _generate_dynamic_single_rs(temp_meta, f"{meta.name}_Result{i + 1}", naming_convention)
+            rs_name = f"{meta.name}_Result{i + 1}"
+            m = _generate_dynamic_single_rs(temp_meta, rs_name, naming_convention)
             models.append(m)
 
         # Patch from_db on the LAST model to handle all RS
@@ -254,8 +256,6 @@ def generate_all_models(
     # Source mode — generate one class per result set
     sources: list[str] = []
     for i, rs in enumerate(meta.result_sets):
-        from singularity.types import ColumnInfo  # noqa: PLC0415
-
         temp_meta = meta.model_copy(update={"result_sets": [rs]})
         suffix = f"Result{i + 1}" if i > 0 else ""
         src = _generate_source(temp_meta, naming_convention, class_suffix=suffix)
@@ -331,7 +331,7 @@ def _generate_dynamic_single_rs(
             fields[field_name] = (type(None) | py_type, None)
 
     model = create_model(class_name, **fields)
-    model._output_param_names = output_param_names  # type: ignore[attr-defined]
+    model._output_param_names = output_param_names
 
     # Build param_order for executor
     all_param_names: list[str] = [p.name for p in meta.parameters]
@@ -339,7 +339,7 @@ def _generate_dynamic_single_rs(
     # Monkey-patch from_db() onto the dynamic model
     _patch_from_db(model, meta.name, output_param_names, all_param_names)
 
-    return model
+    return model  # type: ignore[no-any-return]
 
 
 def _patch_from_db(
@@ -360,7 +360,7 @@ def _patch_from_db(
     all_param_names = all_param_names or []
 
     @classmethod  # type: ignore[misc]
-    def from_db(cls: type[BaseModel], conn_str: str, **params: Any) -> list[BaseModel]:  # type: ignore[no-redef]
+    def from_db(cls: type[BaseModel], conn_str: str, **params: Any) -> list[BaseModel]:
         return execute_sp(
             conn_str,
             sp_name,
@@ -389,7 +389,7 @@ def _patch_from_db_multi(
     last_model = models[-1]
 
     @classmethod  # type: ignore[misc]
-    def from_db(cls: type[BaseModel], conn_str: str, **params: Any) -> list[Any]:  # type: ignore[no-redef]
+    def from_db(cls: type[BaseModel], conn_str: str, **params: Any) -> list[Any]:
         return execute_sp_multi(
             conn_str,
             meta.name,
