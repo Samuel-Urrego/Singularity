@@ -80,6 +80,10 @@ class OutputConfig(BaseModel):
     naming_convention: Literal["snake_case", "camelCase", "PascalCase"] = "snake_case"
     """Field naming convention for generated models."""
 
+    docs_directory: str | None = None
+    """Output directory for generated Markdown documentation.
+    If set, ``singularity docs`` writes docs here. Defaults to ``docs/``."""
+
     @field_validator("mode")
     @classmethod
     def _validate_mode(cls, v: str) -> str:

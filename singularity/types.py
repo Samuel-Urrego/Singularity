@@ -25,6 +25,9 @@ class Parameter(BaseModel):
     nullable: bool = True
     """Whether the parameter accepts NULL."""
 
+    description: str | None = None
+    """Parameter description from sys.extended_properties, or None."""
+
 
 class ColumnInfo(BaseModel):
     """Metadata for a single result set column."""
