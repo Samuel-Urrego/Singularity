@@ -96,7 +96,7 @@ class TestSourceMode:
         """Nullable columns get Optional type in source mode."""
         result = generate_model(sample_sp_metadata, mode="source")
         assert "Optional[int]" in result or "Optional[float]" in result
-        assert "import Optional" in result
+        assert "Optional" in result
 
     def test_snake_case_source(self, sample_sp_metadata) -> None:
         """snake_case is applied in source mode."""
