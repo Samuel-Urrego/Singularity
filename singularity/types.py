@@ -38,6 +38,9 @@ class ColumnInfo(BaseModel):
     nullable: bool = True
     """Whether the column is nullable."""
 
+    description: str | None = None
+    """Column description from sys.extended_properties, or None."""
+
 
 class SPMetadata(BaseModel):
     """Complete metadata for a stored procedure's parameters and result set."""

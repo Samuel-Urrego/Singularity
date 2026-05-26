@@ -135,4 +135,9 @@ class LegacyIntrospector(VersionIntrospector):
                 # If everything fails, return empty columns gracefully
                 pass
 
+        # Enrich with column descriptions from extended properties
+        descriptions = self._fetch_column_descriptions(sp_name, cursor, columns)
+        for col in columns:
+            col.description = descriptions.get(col.name)
+
         return SPMetadata(name=sp_name, parameters=parameters, columns=columns)

@@ -12,7 +12,7 @@ import warnings
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, Field, create_model
 
 from singularity.types import SPMetadata
 
@@ -242,10 +242,20 @@ def _generate_dynamic(
         py_type = _resolve_py_type(col.sql_type)
         field_name = sanitize_field_name(col.name, naming_convention)  # type: ignore[arg-type]
 
+        field_kwargs: dict[str, Any] = {}
+        if col.description:
+            field_kwargs["description"] = col.description
+
         if col.nullable:
-            fields[field_name] = (type(None) | py_type, None)
+            if field_kwargs:
+                fields[field_name] = (type(None) | py_type, Field(default=None, **field_kwargs))
+            else:
+                fields[field_name] = (type(None) | py_type, None)
         else:
-            fields[field_name] = (py_type, ...)
+            if field_kwargs:
+                fields[field_name] = (py_type, Field(..., **field_kwargs))
+            else:
+                fields[field_name] = (py_type, ...)
 
     return create_model(meta.name, **fields)
 
@@ -262,10 +272,15 @@ def _generate_source(
     """Generate a Python source code string for a Pydantic model."""
     class_name = sanitize_field_name(meta.name, "PascalCase")
 
+    has_descriptions = any(col.description for col in meta.columns)
+
     lines: list[str] = []
     lines.append("from datetime import datetime")
     lines.append("from typing import Optional")
-    lines.append("from pydantic import BaseModel")
+    if has_descriptions:
+        lines.append("from pydantic import BaseModel, Field")
+    else:
+        lines.append("from pydantic import BaseModel")
     lines.append("")
 
     if not meta.columns:
@@ -286,10 +301,22 @@ def _generate_source(
         field_name = sanitize_field_name(col.name, naming_convention)  # type: ignore[arg-type]
         type_name = _py_type_name(py_type)
 
-        if col.nullable:
-            lines.append(f"    {field_name}: Optional[{type_name}] = None")
+        if col.description:
+            if col.nullable:
+                lines.append(
+                    f"    {field_name}: Optional[{type_name}] = Field("
+                    f"default=None, description={repr(col.description)})"
+                )
+            else:
+                lines.append(
+                    f"    {field_name}: {type_name} = Field("
+                    f"description={repr(col.description)})"
+                )
         else:
-            lines.append(f"    {field_name}: {type_name}")
+            if col.nullable:
+                lines.append(f"    {field_name}: Optional[{type_name}] = None")
+            else:
+                lines.append(f"    {field_name}: {type_name}")
 
     lines.append("")
     return "\n".join(lines) + "\n"
