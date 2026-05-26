@@ -1,5 +1,5 @@
 [project]
-name = "singularity"
+name = "singularitysql"
 version = "0.1.0"
 description = "SQL Server stored procedure introspection and Pydantic model generator"
 readme = "README.md"
