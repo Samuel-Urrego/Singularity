@@ -257,10 +257,23 @@ def _generate_dynamic(
             else:
                 fields[field_name] = (py_type, ...)
 
+    # Add OUTPUT param fields to the model (as Optional[T] = None)
+    output_param_names: list[str] = []
+    for p in meta.parameters:
+        if p.direction in ("OUT", "INOUT"):
+            py_type = _resolve_py_type(p.sql_type)
+            field_name = sanitize_field_name(p.name, naming_convention)  # type: ignore[arg-type]
+            output_param_names.append(p.name)
+            fields[field_name] = (type(None) | py_type, None)
+
     model = create_model(meta.name, **fields)
+    model._output_param_names = output_param_names  # type: ignore[attr-defined]
+
+    # Build param_order for executor
+    all_param_names: list[str] = [p.name for p in meta.parameters]
 
     # Monkey-patch from_db() onto the dynamic model
-    _patch_from_db(model, meta.name)
+    _patch_from_db(model, meta.name, output_param_names, all_param_names)
 
     return model
 
@@ -268,6 +281,8 @@ def _generate_dynamic(
 def _patch_from_db(
     model: type[BaseModel],
     sp_name: str,
+    output_param_names: list[str] | None = None,
+    all_param_names: list[str] | None = None,
 ) -> None:
     """Monkey-patch a ``from_db()`` classmethod onto a dynamic model.
 
@@ -277,9 +292,19 @@ def _patch_from_db(
     """
     from singularity.executor import execute_sp
 
+    output_param_names = output_param_names or []
+    all_param_names = all_param_names or []
+
     @classmethod  # type: ignore[misc]
     def from_db(cls: type[BaseModel], conn_str: str, **params: Any) -> list[BaseModel]:  # type: ignore[no-redef]
-        return execute_sp(conn_str, sp_name, cls, params)
+        return execute_sp(
+            conn_str,
+            sp_name,
+            cls,
+            input_params=params,
+            output_param_names=output_param_names,
+            param_order=all_param_names,
+        )
 
     model.from_db = from_db  # type: ignore[attr-defined]
 
@@ -309,17 +334,41 @@ def _generate_source(
     lines.append("from singularity.executor import execute_sp")
     lines.append("")
 
+    # Identify OUTPUT params (used for no-columns case too)
+    output_params = [p for p in meta.parameters if p.direction in ("OUT", "INOUT")]
+    output_param_names = [p.name for p in output_params]
+    all_param_names = [p.name for p in meta.parameters]
+
     if not meta.columns:
         lines.append(f"class {class_name}(BaseModel):")
         lines.append(f"    _sp_name = {repr(meta.name)}")
+        lines.append(f"    _output_param_names = {repr(output_param_names)}")
         lines.append("")
-        lines.append("    def from_db(cls, conn_str: str, **params: Any) -> list[BaseModel]:")  # noqa: E501
+        for p in output_params:
+            field_name = sanitize_field_name(p.name, naming_convention)  # type: ignore[arg-type]
+            lines.append(f"    {field_name}: Optional[Any] = None")
+        if output_params:
+            lines.append("")
+        lines.append("    @classmethod")
+        lines.append("    def from_db(cls, conn_str: str, **params: Any) -> list[BaseModel]:")
         lines.append('        """Execute the stored procedure and return typed instances."""')
-        lines.append("        return execute_sp(conn_str, cls._sp_name, cls, params)")
+        lines.append("        return execute_sp(")
+        lines.append("            conn_str,")
+        lines.append("            cls._sp_name,")
+        lines.append("            cls,")
+        lines.append("            input_params=params,")
+        lines.append(f"            output_param_names={repr(output_param_names)},")
+        lines.append(f"            param_order={repr(all_param_names)},")
+        lines.append("        )")
         lines.append("")
         lines.append("    pass")
         lines.append("")
         return "\n".join(lines) + "\n"
+
+    # Identify OUTPUT params
+    output_params = [p for p in meta.parameters if p.direction in ("OUT", "INOUT")]
+    output_param_names = [p.name for p in output_params]
+    all_param_names = [p.name for p in meta.parameters]
 
     lines.append(f"class {class_name}(BaseModel):")
     lines.append(f'    """Model generated from stored procedure: {meta.name}.')
@@ -352,10 +401,30 @@ def _generate_source(
             else:
                 lines.append(f"    {field_name}: {type_name}")
 
+    # Add OUTPUT param fields (Optional[T] = None)
+    for p in output_params:
+        py_type = _resolve_py_type(p.sql_type)
+        field_name = sanitize_field_name(p.name, naming_convention)  # type: ignore[arg-type]
+        type_name = _py_type_name(py_type)
+        lines.append(f"    {field_name}: Optional[{type_name}] = None")
+
+    # Store output param names for executor
+    if output_param_names:
+        lines.append(f"    _output_param_names = {repr(output_param_names)}")
+    else:
+        lines.append("    _output_param_names: list[str] = []")
+
     lines.append("")
     lines.append("    @classmethod")
     lines.append("    def from_db(cls, conn_str: str, **params: Any) -> list[BaseModel]:")
     lines.append('        """Execute the stored procedure and return typed instances."""')
-    lines.append("        return execute_sp(conn_str, cls._sp_name, cls, params)")
+    lines.append("        return execute_sp(")
+    lines.append("            conn_str,")
+    lines.append("            cls._sp_name,")
+    lines.append("            cls,")
+    lines.append("            input_params=params,")
+    lines.append(f"            output_param_names={repr(output_param_names)},")
+    lines.append(f"            param_order={repr(all_param_names)},")
+    lines.append("        )")
     lines.append("")
     return "\n".join(lines) + "\n"
