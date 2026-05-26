@@ -1,4 +1,6 @@
-# Singularity
+<p align="center">
+  <img src="assets/logo.png" alt="Singularity" width="400">
+</p>
 
 > SQL Server → Pydantic v2. Automatically.
 
